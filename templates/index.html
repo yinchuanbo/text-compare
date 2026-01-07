@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Git Diff Viewer</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        #input-area {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        input {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            flex-grow: 1;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #file-list {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .file-item {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .file-item:last-child {
+            border-bottom: none;
+        }
+        .file-item:hover {
+            background-color: #f8f9fa;
+        }
+        .change-type {
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .type-M { background-color: #fff3cd; color: #856404; }
+        .type-A { background-color: #d4edda; color: #155724; }
+        .type-D { background-color: #f8d7da; color: #721c24; }
+        .type-R { background-color: #cce5ff; color: #004085; }
+
+        /* Full Screen Modal */
+        #diff-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: white;
+            z-index: 1000;
+            flex-direction: column;
+        }
+        #modal-header {
+            height: 50px;
+            padding: 0 20px;
+            background-color: #333;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        #modal-title {
+            font-size: 16px;
+            font-weight: bold;
+        }
+        #close-btn {
+            background: #dc3545;
+            padding: 5px 15px;
+            font-size: 14px;
+            border: none;
+            color: white;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        #close-btn:hover {
+            background: #bd2130;
+        }
+        #diff-container {
+            flex-grow: 1;
+            width: 100%;
+            overflow: hidden;
+        }
+        #loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Text Comparator</h1>
+    
+    <div id="input-area">
+        <input type="text" id="repo-path" placeholder="Repository Absolute Path (e.g. C:/Users/Dev/Project)">
+        <input type="text" id="commit-id" placeholder="Commit ID (SHA)">
+        <button onclick="loadFileList()">Analyze Commit</button>
+    </div>
+
+    <div id="loading">Processing...</div>
+    <div id="file-list"></div>
+
+    <div id="diff-modal">
+        <div id="modal-header">
+            <span id="modal-title">Diff Viewer</span>
+            <button id="close-btn" onclick="closeModal()">Close</button>
+        </div>
+        <div id="diff-container"></div>
+    </div>
+
+    <!-- Load Monaco Editor -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+    <script>
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }});
+
+        let diffEditor = null;
+        let originalModel = null;
+        let modifiedModel = null;
+
+        require(['vs/editor/editor.main'], function() {
+            // Initialize Diff Editor but don't show it yet
+            // We defer creation until the modal is opened to ensure correct sizing
+        });
+
+        async function loadFileList() {
+            const repoPath = document.getElementById('repo-path').value;
+            const commitId = document.getElementById('commit-id').value;
+            const listContainer = document.getElementById('file-list');
+            const loading = document.getElementById('loading');
+
+            if (!repoPath || !commitId) {
+                alert('Please enter both Repo Path and Commit ID');
+                return;
+            }
+
+            listContainer.innerHTML = '';
+            loading.style.display = 'block';
+
+            try {
+                const response = await fetch('/api/get_diff_files', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ repo_path: repoPath, commit_id: commitId })
+                });
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+
+                if (data.files.length === 0) {
+                    listContainer.innerHTML = '<div style="padding:20px;">No changed files found (excluding static assets).</div>';
+                }
+
+                data.files.forEach(file => {
+                    const div = document.createElement('div');
+                    div.className = 'file-item';
+                    div.innerHTML = `
+                        <span>${file.path}</span>
+                        <span class="change-type type-${file.change_type}">${file.change_type}</span>
+                    `;
+                    div.onclick = () => openDiff(repoPath, commitId, file.path);
+                    listContainer.appendChild(div);
+                });
+
+            } catch (err) {
+                alert('Request failed: ' + err);
+            } finally {
+                loading.style.display = 'none';
+            }
+        }
+
+        async function openDiff(repoPath, commitId, filePath) {
+            const modal = document.getElementById('diff-modal');
+            const title = document.getElementById('modal-title');
+            
+            title.textContent = `Comparing: ${filePath}`;
+            modal.style.display = 'flex'; // Show modal
+
+            // Ensure editor is created
+            if (!diffEditor) {
+                diffEditor = monaco.editor.createDiffEditor(document.getElementById('diff-container'), {
+                    originalEditable: false,
+                    readOnly: true,
+                    automaticLayout: true,
+                    theme: 'vs-dark'
+                });
+            }
+
+            try {
+                const response = await fetch('/api/get_file_content', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        repo_path: repoPath, 
+                        commit_id: commitId,
+                        file_path: filePath
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert('Error loading file content: ' + data.error);
+                    closeModal();
+                    return;
+                }
+
+                originalModel = monaco.editor.createModel(data.old_content, data.language);
+                modifiedModel = monaco.editor.createModel(data.new_content, data.language);
+
+                diffEditor.setModel({
+                    original: originalModel,
+                    modified: modifiedModel
+                });
+
+            } catch (err) {
+                alert('Failed to load file content: ' + err);
+                closeModal();
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('diff-modal').style.display = 'none';
+            // Clean up models to free memory
+            if (originalModel) originalModel.dispose();
+            if (modifiedModel) modifiedModel.dispose();
+            originalModel = null;
+            modifiedModel = null;
+        }
+    </script>
+</body>
+</html>
