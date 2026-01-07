@@ -220,7 +220,11 @@
                     originalEditable: false,
                     readOnly: true,
                     automaticLayout: true,
-                    theme: 'vs-dark'
+                    theme: 'vs-dark',
+                    wordWrap: 'on',
+                    diffWordWrap: 'on',
+                    ignoreTrimWhitespace: true,
+                    renderSideBySide: true
                 });
             }
 
@@ -264,6 +268,15 @@
             if (modifiedModel) modifiedModel.dispose();
             originalModel = null;
             modifiedModel = null;
+        }
+
+        function toggleSideBySide() {
+            const isSideBySide = document.getElementById('side-by-side-cb').checked;
+            if (diffEditor) {
+                diffEditor.updateOptions({
+                    renderSideBySide: isSideBySide
+                });
+            }
         }
     </script>
 </body>

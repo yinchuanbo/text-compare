@@ -24,11 +24,12 @@ def format_code(content, filename):
     
     try:
         if ext == '.py':
-            return autopep8.fix_code(content)
+            return autopep8.fix_code(content, options={'max_line_length': 100})
         elif ext in {'.js', '.json', '.css', '.html'}:
             # jsbeautifier default options
             opts = jsbeautifier.default_options()
             opts.indent_size = 4
+            opts.wrap_line_length = 100
             return jsbeautifier.beautify(content, opts)
         # Add more formatters here if needed
     except Exception as e:
