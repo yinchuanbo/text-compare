@@ -140,7 +140,6 @@
         }
         #close-btn {
             background: #dc3545;
-            padding: 5px 15px;
             font-size: 14px;
             border: none;
             color: white;
@@ -185,6 +184,8 @@
         <div id="modal-header">
             <span id="modal-title">Diff Viewer</span>
             <div id="controls" style="display: flex; align-items: center; gap: 10px;">
+                <button class="nav-btn" onclick="exportDiff()" title="Export Diff to TXT">Export Diff</button>
+                <div style="width: 1px; height: 20px; background: #555;"></div>
                 <button class="nav-btn" onclick="navPrevious()" title="Previous Change">↑ Prev</button>
                 <button class="nav-btn" onclick="navNext()" title="Next Change">↓ Next</button>
                 <div style="width: 1px; height: 20px; background: #555;"></div>
@@ -412,6 +413,62 @@
         }
 
         // Attach functions to window to make them accessible from HTML
+        window.exportDiff = function() {
+            if (!diffEditor) return;
+            
+            const changes = diffEditor.getLineChanges();
+            if (!changes || changes.length === 0) {
+                alert('No changes to export.');
+                return;
+            }
+            
+            const modifiedModel = diffEditor.getModifiedEditor().getModel();
+            const originalModel = diffEditor.getOriginalEditor().getModel();
+            const filePath = document.getElementById('modal-title').textContent.replace('Comparing: ', '');
+            
+            let exportContent = `File: ${filePath}\n`;
+            exportContent += `Date: ${new Date().toLocaleString()}\n`;
+            exportContent += `----------------------------------------\n\n`;
+            
+            changes.forEach((change, index) => {
+                exportContent += `[Change #${index + 1}]\n`;
+                
+                // Original lines (Deleted/Modified from)
+                if (change.originalEndLineNumber >= change.originalStartLineNumber) {
+                     // Check if it's a valid range (not a pure insertion where start > end in some contexts, 
+                     // but Monaco usually gives valid 0 or range. If start=0, it means empty original)
+                     if (change.originalStartLineNumber > 0) {
+                        exportContent += `--- Original (Lines ${change.originalStartLineNumber}-${change.originalEndLineNumber}):\n`;
+                        for (let i = change.originalStartLineNumber; i <= change.originalEndLineNumber; i++) {
+                            exportContent += `- ${originalModel.getLineContent(i)}\n`;
+                        }
+                     }
+                }
+                
+                // Modified lines (Added/Modified to)
+                if (change.modifiedEndLineNumber >= change.modifiedStartLineNumber) {
+                     if (change.modifiedStartLineNumber > 0) {
+                        exportContent += `+++ Modified (Lines ${change.modifiedStartLineNumber}-${change.modifiedEndLineNumber}):\n`;
+                        for (let i = change.modifiedStartLineNumber; i <= change.modifiedEndLineNumber; i++) {
+                            exportContent += `+ ${modifiedModel.getLineContent(i)}\n`;
+                        }
+                     }
+                }
+                
+                exportContent += `\n`;
+            });
+            
+            const blob = new Blob([exportContent], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `diff_export_${new Date().getTime()}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        };
+
         window.navPrevious = function() {
             if (!diffEditor) return;
             
