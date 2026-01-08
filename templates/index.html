@@ -40,8 +40,9 @@
             display: flex;
             gap: 10px;
             margin-bottom: 20px;
+            align-items: center;
         }
-        input {
+        input[type="text"] {
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 4px;
@@ -57,6 +58,30 @@
         }
         button:hover {
             background-color: #0056b3;
+        }
+        #review-progress {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: none; /* Hidden by default */
+            align-items: center;
+            justify-content: space-between;
+        }
+        #progress-bar-container {
+            flex-grow: 1;
+            margin: 0 20px;
+            background: #e9ecef;
+            height: 20px;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        #progress-bar {
+            height: 100%;
+            background: #28a745;
+            width: 0%;
+            transition: width 0.3s ease;
         }
         #file-list {
             background: white;
@@ -112,6 +137,19 @@
         .type-D { background-color: #f8d7da; color: #721c24; }
         .type-R { background-color: #cce5ff; color: #004085; }
 
+        /* Status Dot Styles */
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            background-color: #007bff; /* Unread (Blue) */
+        }
+        .status-read {
+            background-color: #ccc; /* Read (Gray) */
+        }
+
         /* Full Screen Modal */
         #diff-modal {
             display: none;
@@ -137,6 +175,9 @@
         #modal-title {
             font-size: 16px;
             font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         #close-btn {
             background: #dc3545;
@@ -174,7 +215,19 @@
     <div id="input-area">
         <input type="text" id="repo-path" placeholder="Repository Absolute Path (e.g. C:/Users/Dev/Project)">
         <input type="text" id="commit-id" placeholder="Commit ID (SHA)">
-        <button onclick="loadFileList()">Analyze Commit</button>
+        <label style="display:flex; align-items:center; cursor:pointer; margin-left:10px;">
+            <input type="checkbox" id="hide-whitespace-files"> 
+            <span style="margin-left:4px; font-size:14px;">Hide Whitespace-only Changes</span>
+        </label>
+        <button onclick="loadFileList()" style="margin-left:10px;">Analyze Commit</button>
+    </div>
+
+    <div id="review-progress">
+        <span id="progress-text" style="font-weight:bold;">Reviewed: 0 / 0</span>
+        <div id="progress-bar-container">
+            <div id="progress-bar"></div>
+        </div>
+        <button onclick="markAllRead()" style="padding: 5px 15px; font-size: 12px; background-color: #6c757d;">Mark All Read</button>
     </div>
 
     <div id="loading">Processing...</div>
@@ -184,6 +237,12 @@
         <div id="modal-header">
             <span id="modal-title">Diff Viewer</span>
             <div id="controls" style="display: flex; align-items: center; gap: 10px;">
+                <label style="font-size:12px; display:flex; align-items:center; cursor:pointer;">
+                    <input type="checkbox" id="ignore-whitespace-modal" onchange="toggleIgnoreWhitespace()"> 
+                    <span style="margin-left:4px;">Ignore Whitespace</span>
+                </label>
+                <div style="width: 1px; height: 20px; background: #555;"></div>
+                <button class="nav-btn" onclick="openSyncDialog()" title="Sync changes to other locations" style="background:#28a745;">Sync Diff</button>
                 <button class="nav-btn" onclick="exportDiff()" title="Export Diff to TXT">Export Diff</button>
                 <div style="width: 1px; height: 20px; background: #555;"></div>
                 <button class="nav-btn" onclick="navPrevious()" title="Previous Change">↑ Prev</button>
@@ -195,6 +254,25 @@
         <div id="diff-container"></div>
     </div>
 
+    <!-- Sync Dialog -->
+    <div id="sync-dialog" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
+        <div style="background:white; padding:20px; border-radius:8px; width:500px; box-shadow:0 4px 12px rgba(0,0,0,0.2);">
+            <h3 style="margin-top:0;">Sync Diff to Other Directories</h3>
+            <p style="font-size:13px; color:#666;">Enter absolute paths of target root directories (one per line). The patch will be applied relative to these roots.</p>
+            <textarea id="target-roots" rows="5" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; margin-bottom:15px;" placeholder="D:/Project/site-en&#10;D:/Project/site-fr"></textarea>
+            
+            <label style="display:flex; align-items:center; margin-bottom:15px; cursor:pointer; font-size:12px; color:#dc3545;">
+                <input type="checkbox" id="force-overwrite-sync" style="margin-right:5px;"> 
+                Force Overwrite if Patch Fails (Dangerous: Replaces entire file)
+            </label>
+
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button onclick="document.getElementById('sync-dialog').style.display='none'" style="background:#6c757d;">Cancel</button>
+                <button onclick="performSync()" style="background:#28a745;">Apply Sync</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Load Monaco Editor -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
     <script>
@@ -204,15 +282,82 @@
         let diffNavigator = null;
         let originalModel = null;
         let modifiedModel = null;
+        let currentFiles = []; // To track all files for progress
+        let currentChanges = []; // For navigation
+        let currentFilePath = null;
+        let currentChangeType = null;
 
         require(['vs/editor/editor.main'], function() {
             // Initialize Diff Editor but don't show it yet
-            // We defer creation until the modal is opened to ensure correct sizing
         });
+
+        // Read Status Management
+        function getReadStatusKey() {
+            const repo = document.getElementById('repo-path').value;
+            const commit = document.getElementById('commit-id').value;
+            if (!repo || !commit) return null;
+            return `text-compare-read-${repo}-${commit}`;
+        }
+
+        function loadReadStatus() {
+            const key = getReadStatusKey();
+            if (!key) return {};
+            try {
+                return JSON.parse(localStorage.getItem(key)) || {};
+            } catch {
+                return {};
+            }
+        }
+
+        function saveReadStatus(status) {
+            const key = getReadStatusKey();
+            if (key) localStorage.setItem(key, JSON.stringify(status));
+            updateProgressDisplay();
+        }
+
+        function markFileRead(filePath) {
+            const status = loadReadStatus();
+            status[filePath] = true;
+            saveReadStatus(status);
+            
+            // Update UI
+            const fileItems = document.querySelectorAll('.file-item');
+            fileItems.forEach(item => {
+                if (item.dataset.path === filePath) {
+                    const dot = item.querySelector('.status-dot');
+                    if (dot) dot.classList.add('status-read');
+                }
+            });
+        }
+
+        function markAllRead() {
+            const status = loadReadStatus();
+            currentFiles.forEach(f => status[f.path] = true);
+            saveReadStatus(status);
+            
+            // Update all UI dots
+            document.querySelectorAll('.status-dot').forEach(dot => dot.classList.add('status-read'));
+        }
+
+        function updateProgressDisplay() {
+            if (currentFiles.length === 0) return;
+            
+            const status = loadReadStatus();
+            let readCount = 0;
+            currentFiles.forEach(f => {
+                if (status[f.path]) readCount++;
+            });
+
+            const percent = (readCount / currentFiles.length) * 100;
+            document.getElementById('progress-bar').style.width = percent + '%';
+            document.getElementById('progress-text').innerText = `Reviewed: ${readCount} / ${currentFiles.length}`;
+            document.getElementById('review-progress').style.display = 'flex';
+        }
 
         async function loadFileList() {
             const repoPath = document.getElementById('repo-path').value;
             const commitId = document.getElementById('commit-id').value;
+            const ignoreWhitespace = document.getElementById('hide-whitespace-files').checked;
             const listContainer = document.getElementById('file-list');
             const loading = document.getElementById('loading');
 
@@ -223,12 +368,17 @@
 
             listContainer.innerHTML = '';
             loading.style.display = 'block';
+            document.getElementById('review-progress').style.display = 'none';
 
             try {
                 const response = await fetch('/api/get_diff_files', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ repo_path: repoPath, commit_id: commitId })
+                    body: JSON.stringify({ 
+                        repo_path: repoPath, 
+                        commit_id: commitId,
+                        ignore_whitespace: ignoreWhitespace
+                    })
                 });
 
                 const data = await response.json();
@@ -242,6 +392,9 @@
                     listContainer.innerHTML = '<div style="padding:20px;">No changed files found (excluding static assets).</div>';
                     return;
                 }
+
+                currentFiles = data.files; // Store for progress tracking
+                updateProgressDisplay(); // Initialize progress bar
 
                 const fileTree = buildFileTree(data.files);
                 renderTree(fileTree, listContainer, 0);
@@ -297,97 +450,123 @@
                 return a.localeCompare(b);
             });
 
+            const status = loadReadStatus();
+
             childrenKeys.forEach(key => {
                 const child = node.children[key];
-                const indent = level * 20 + 20;
+                const itemDiv = document.createElement('div');
+                itemDiv.style.paddingLeft = (level * 20 + 20) + 'px';
 
                 if (child.type === 'folder') {
-                    const folderDiv = document.createElement('div');
-                    folderDiv.className = 'folder-item';
-                    folderDiv.style.paddingLeft = `${indent}px`;
-                    folderDiv.innerHTML = `
-                        <span style="display:flex; align-items:center;">
-                            <span class="folder-icon">📂</span> 
-                            ${child.name}
-                        </span>
+                    itemDiv.className = 'folder-item';
+                    itemDiv.innerHTML = `
+                        <div style="display:flex; align-items:center;">
+                            <span class="folder-icon">📁</span>
+                            <span>${child.name}</span>
+                        </div>
                     `;
                     
                     const contentDiv = document.createElement('div');
                     contentDiv.className = 'folder-content';
                     
-                    folderDiv.onclick = (e) => {
+                    itemDiv.onclick = (e) => {
                         e.stopPropagation();
                         contentDiv.classList.toggle('collapsed');
-                        const icon = folderDiv.querySelector('.folder-icon');
-                        icon.textContent = contentDiv.classList.contains('collapsed') ? '📁' : '📂';
                     };
 
-                    container.appendChild(folderDiv);
+                    container.appendChild(itemDiv);
                     container.appendChild(contentDiv);
-                    
                     renderTree(child, contentDiv, level + 1);
                 } else {
-                    const fileDiv = document.createElement('div');
-                    fileDiv.className = 'file-item';
-                    fileDiv.style.paddingLeft = `${indent}px`;
-                    fileDiv.innerHTML = `
-                        <span style="display:flex; align-items:center;">
-                            <span class="folder-icon">📄</span> 
-                            ${child.name}
-                        </span>
+                    itemDiv.className = 'file-item';
+                    itemDiv.dataset.path = child.path;
+                    
+                    const isRead = status[child.path];
+                    const dotClass = isRead ? 'status-dot status-read' : 'status-dot';
+
+                    itemDiv.innerHTML = `
+                        <div style="display:flex; align-items:center;">
+                            <div class="${dotClass}"></div>
+                            <span>${child.name}</span>
+                        </div>
                         <span class="change-type type-${child.change_type}">${child.change_type}</span>
                     `;
-                    fileDiv.onclick = () => openDiff(document.getElementById('repo-path').value, document.getElementById('commit-id').value, child.path);
-                    container.appendChild(fileDiv);
+                    
+                    itemDiv.onclick = () => openDiff(child.path, child.change_type);
+                    container.appendChild(itemDiv);
                 }
             });
         }
 
-        async function openDiff(repoPath, commitId, filePath) {
+        async function openDiff(filePath, changeType) {
+            currentFilePath = filePath;
+            currentChangeType = changeType;
+            const repoPath = document.getElementById('repo-path').value;
+            const commitId = document.getElementById('commit-id').value;
             const modal = document.getElementById('diff-modal');
-            const title = document.getElementById('modal-title');
+            const container = document.getElementById('diff-container');
+            const modalTitle = document.getElementById('modal-title');
             
-            title.textContent = `Comparing: ${filePath}`;
-            modal.style.display = 'flex'; // Show modal
-
-            // Ensure editor is created
-            if (!diffEditor) {
-                diffEditor = monaco.editor.createDiffEditor(document.getElementById('diff-container'), {
-                    originalEditable: false,
-                    readOnly: true,
-                    automaticLayout: true,
-                    theme: 'vs-dark',
-                    wordWrap: 'on',
-                    diffWordWrap: 'on',
-                    ignoreTrimWhitespace: true,
-                    renderSideBySide: true,
-                    useInlineViewWhenSpaceIsLimited: false
-                });
-            } else {
-                // Force Side-by-Side view every time it is opened
-                diffEditor.updateOptions({
-                    renderSideBySide: true
-                });
+            // Update Title with Read Status
+            const status = loadReadStatus();
+            const isRead = status[filePath];
+            const dotHtml = `<div class="status-dot ${isRead ? 'status-read' : ''}" style="margin-left:10px;"></div>`;
+            
+            let statusText = "";
+            if (changeType === 'A') statusText = " (New File)";
+            else if (changeType === 'D') statusText = " (Deleted File)";
+            
+            modalTitle.innerHTML = `Comparing: ${filePath}${statusText} ${dotHtml}`;
+            
+            modal.style.display = 'flex';
+            
+            // Dispose existing editor before clearing container
+            if (diffEditor) {
+                diffEditor.dispose();
+                diffEditor = null;
             }
+            if (originalModel) originalModel.dispose();
+            if (modifiedModel) modifiedModel.dispose();
+            
+            container.innerHTML = 'Loading...';
+
+            // Mark as Read immediately upon opening
+            markFileRead(filePath);
 
             try {
+                const ignoreWhitespace = document.getElementById('ignore-whitespace-modal').checked;
                 const response = await fetch('/api/get_file_content', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         repo_path: repoPath, 
-                        commit_id: commitId,
-                        file_path: filePath
+                        commit_id: commitId, 
+                        file_path: filePath,
+                        ignore_whitespace: ignoreWhitespace
                     })
                 });
 
                 const data = await response.json();
-                
+                container.innerHTML = '';
+
                 if (data.error) {
-                    alert('Error loading file content: ' + data.error);
-                    closeModal();
+                    container.innerText = 'Error: ' + data.error;
                     return;
                 }
+
+                diffEditor = monaco.editor.createDiffEditor(container, {
+                    originalEditable: false,
+                    readOnly: true,
+                    renderSideBySide: true, // Permanent Split Pane
+                    automaticLayout: true,
+                    theme: 'vs-dark',
+                    ignoreTrimWhitespace: ignoreWhitespace
+                });
+                
+                // Update changes when diff computation finishes
+                diffEditor.onDidUpdateDiff(() => {
+                    calculateChanges();
+                });
 
                 originalModel = monaco.editor.createModel(data.old_content, data.language);
                 modifiedModel = monaco.editor.createModel(data.new_content, data.language);
@@ -396,133 +575,192 @@
                     original: originalModel,
                     modified: modifiedModel
                 });
-
+                
             } catch (err) {
-                alert('Failed to load file content: ' + err);
-                closeModal();
+                container.innerText = 'Error loading diff: ' + err;
             }
+        }
+        
+        function toggleIgnoreWhitespace() {
+            if (currentFilePath) {
+                openDiff(currentFilePath, currentChangeType);
+            }
+        }
+
+        function calculateChanges() {
+            if (!diffEditor) return;
+            // Get line changes
+             const changes = diffEditor.getLineChanges();
+             if (!changes) {
+                 currentChanges = [];
+                 return;
+             }
+             
+             // Convert to simple list of start line numbers in Modified model
+             currentChanges = changes.map(c => {
+                 // c.modifiedStartLineNumber is 0 if it's a deletion, but we want to jump to where it would be
+                 // If modifiedEndLineNumber is 0, it means pure deletion.
+                 // We should use modifiedStartLineNumber unless it is 0, then use originalStartLineNumber mapped?
+                 // Actually, Monaco handles revealing 0 nicely usually, or we use 1.
+                 return c.modifiedStartLineNumber > 0 ? c.modifiedStartLineNumber : c.modifiedEndLineNumber + 1; 
+             }).sort((a,b) => a - b);
         }
 
         function closeModal() {
             document.getElementById('diff-modal').style.display = 'none';
-            // Clean up models to free memory
+            if (diffEditor) {
+                diffEditor.dispose();
+                diffEditor = null;
+            }
             if (originalModel) originalModel.dispose();
             if (modifiedModel) modifiedModel.dispose();
-            originalModel = null;
-            modifiedModel = null;
         }
 
-        // Attach functions to window to make them accessible from HTML
-        window.exportDiff = function() {
-            if (!diffEditor) return;
+        // Navigation Functions
+        window.navNext = function() {
+            if (!diffEditor || currentChanges.length === 0) return;
             
-            const changes = diffEditor.getLineChanges();
-            if (!changes || changes.length === 0) {
-                alert('No changes to export.');
-                return;
+            const currentPos = diffEditor.getModifiedEditor().getPosition();
+            const currentLine = currentPos.lineNumber;
+            
+            // Find next change after current line
+            const nextLine = currentChanges.find(line => line > currentLine);
+            
+            if (nextLine) {
+                diffEditor.getModifiedEditor().revealPositionInCenter({ lineNumber: nextLine, column: 1 });
+                diffEditor.getModifiedEditor().setPosition({ lineNumber: nextLine, column: 1 });
+            } else {
+                // Loop to start
+                const firstLine = currentChanges[0];
+                diffEditor.getModifiedEditor().revealPositionInCenter({ lineNumber: firstLine, column: 1 });
+                diffEditor.getModifiedEditor().setPosition({ lineNumber: firstLine, column: 1 });
             }
-            
-            const modifiedModel = diffEditor.getModifiedEditor().getModel();
-            const originalModel = diffEditor.getOriginalEditor().getModel();
-            const filePath = document.getElementById('modal-title').textContent.replace('Comparing: ', '');
-            
-            let exportContent = `File: ${filePath}\n`;
-            exportContent += `Date: ${new Date().toLocaleString()}\n`;
-            exportContent += `----------------------------------------\n\n`;
-            
-            changes.forEach((change, index) => {
-                exportContent += `[Change #${index + 1}]\n`;
-                
-                // Original lines (Deleted/Modified from)
-                if (change.originalEndLineNumber >= change.originalStartLineNumber) {
-                     // Check if it's a valid range (not a pure insertion where start > end in some contexts, 
-                     // but Monaco usually gives valid 0 or range. If start=0, it means empty original)
-                     if (change.originalStartLineNumber > 0) {
-                        exportContent += `--- Original (Lines ${change.originalStartLineNumber}-${change.originalEndLineNumber}):\n`;
-                        for (let i = change.originalStartLineNumber; i <= change.originalEndLineNumber; i++) {
-                            exportContent += `- ${originalModel.getLineContent(i)}\n`;
-                        }
-                     }
-                }
-                
-                // Modified lines (Added/Modified to)
-                if (change.modifiedEndLineNumber >= change.modifiedStartLineNumber) {
-                     if (change.modifiedStartLineNumber > 0) {
-                        exportContent += `+++ Modified (Lines ${change.modifiedStartLineNumber}-${change.modifiedEndLineNumber}):\n`;
-                        for (let i = change.modifiedStartLineNumber; i <= change.modifiedEndLineNumber; i++) {
-                            exportContent += `+ ${modifiedModel.getLineContent(i)}\n`;
-                        }
-                     }
-                }
-                
-                exportContent += `\n`;
-            });
-            
-            const blob = new Blob([exportContent], { type: 'text/plain' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `diff_export_${new Date().getTime()}.txt`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
         };
 
         window.navPrevious = function() {
-            if (!diffEditor) return;
+            if (!diffEditor || currentChanges.length === 0) return;
             
-            const changes = diffEditor.getLineChanges();
-            if (!changes || changes.length === 0) return;
+            const currentPos = diffEditor.getModifiedEditor().getPosition();
+            const currentLine = currentPos.lineNumber;
             
-            const currentLine = diffEditor.getModifiedEditor().getPosition().lineNumber;
+            // Find prev change before current line
+            // Reverse list to find first one smaller
+            const prevLine = [...currentChanges].reverse().find(line => line < currentLine);
             
-            // Find prev change (iterate backwards)
-            // Filter changes before current line
-            const prevChanges = changes.filter(c => c.modifiedStartLineNumber < currentLine);
-            
-            let prevChange = null;
-            if (prevChanges.length > 0) {
-                prevChange = prevChanges[prevChanges.length - 1];
+            if (prevLine) {
+                diffEditor.getModifiedEditor().revealPositionInCenter({ lineNumber: prevLine, column: 1 });
+                diffEditor.getModifiedEditor().setPosition({ lineNumber: prevLine, column: 1 });
             } else {
-                // Wrap to last
-                prevChange = changes[changes.length - 1];
-            }
-            
-            if (prevChange) {
-                let targetLine = prevChange.modifiedStartLineNumber;
-                if (targetLine === 0) targetLine = 1;
-                
-                diffEditor.getModifiedEditor().setPosition({ lineNumber: targetLine, column: 1 });
-                diffEditor.getModifiedEditor().revealPositionInCenter({ lineNumber: targetLine, column: 1 });
-                diffEditor.getModifiedEditor().focus();
+                // Loop to end
+                const lastLine = currentChanges[currentChanges.length - 1];
+                diffEditor.getModifiedEditor().revealPositionInCenter({ lineNumber: lastLine, column: 1 });
+                diffEditor.getModifiedEditor().setPosition({ lineNumber: lastLine, column: 1 });
             }
         };
 
-        window.navNext = function() {
+        // Attach functions to window to make them accessible from HTML
+        window.openSyncDialog = function() {
+            document.getElementById('sync-dialog').style.display = 'flex';
+            // Pre-fill with previous targets if available
+            const savedTargets = localStorage.getItem('text-compare-sync-targets');
+            if (savedTargets) {
+                document.getElementById('target-roots').value = savedTargets;
+            }
+        };
+
+        window.performSync = async function() {
+            const targetsText = document.getElementById('target-roots').value;
+            const targetRoots = targetsText.split('\n').filter(t => t.trim());
+            
+            if (targetRoots.length === 0) {
+                alert('Please enter at least one target directory.');
+                return;
+            }
+            
+            localStorage.setItem('text-compare-sync-targets', targetsText);
+            
+            const repoPath = document.getElementById('repo-path').value;
+            const commitId = document.getElementById('commit-id').value;
+            const filePath = document.getElementById('modal-title').textContent.replace('Comparing: ', '').split(' (')[0].trim(); 
+            // Note: filePath extraction might need adjustment if title has status text
+            // Title format: `Comparing: ${filePath}${statusText} ${dotHtml}`
+            // We need to be careful.
+            // Let's store filePath in a global var when opening diff to be safe?
+            // Or just re-parse carefully.
+            
+            // Better approach: Store currentFilePath in a variable
+            // But for now let's clean the string.
+            // The title contains HTML, so textContent will strip it but leave the text.
+            // "Comparing: path/to/file (New File) "
+            
+            let cleanPath = document.getElementById('modal-title').innerText;
+            cleanPath = cleanPath.replace('Comparing: ', '');
+            // Remove (New File) etc
+            cleanPath = cleanPath.replace(' (New File)', '').replace(' (Deleted File)', '');
+            cleanPath = cleanPath.trim();
+            
+            if (!repoPath || !commitId || !cleanPath) return;
+            
+            const forceOverwrite = document.getElementById('force-overwrite-sync').checked;
+
+            const btn = document.querySelector('#sync-dialog button[onclick="performSync()"]');
+            const originalText = btn.textContent;
+            btn.textContent = 'Syncing...';
+            btn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/sync_file_diff', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        repo_path: repoPath,
+                        commit_id: commitId,
+                        file_path: cleanPath,
+                        target_roots: targetRoots,
+                        force_overwrite: forceOverwrite
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                } else {
+                    let msg = 'Sync Results:\n';
+                    let successCount = 0;
+                    data.results.forEach(r => {
+                        msg += `- ${r.target}: ${r.status} ${r.message ? '(' + r.message + ')' : ''}\n`;
+                        if (r.status === 'success') successCount++;
+                    });
+                    console.log(msg);
+                    alert(msg);
+                    if (successCount === data.results.length) {
+                        document.getElementById('sync-dialog').style.display = 'none';
+                    }
+                }
+            } catch (e) {
+                alert('Request failed: ' + e);
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }
+        };
+
+        window.exportDiff = function() {
             if (!diffEditor) return;
             
-            const changes = diffEditor.getLineChanges();
-            if (!changes || changes.length === 0) return;
+            const modified = diffEditor.getModifiedEditor().getValue();
+            const original = diffEditor.getOriginalEditor().getValue();
             
-            const currentLine = diffEditor.getModifiedEditor().getPosition().lineNumber;
+            const content = `Original:\n${original}\n\nModified:\n${modified}`;
             
-            // Find next change
-            let nextChange = changes.find(c => c.modifiedStartLineNumber > currentLine);
-            
-            // Wrap around
-            if (!nextChange) {
-                nextChange = changes[0];
-            }
-            
-            if (nextChange) {
-                let targetLine = nextChange.modifiedStartLineNumber;
-                if (targetLine === 0) targetLine = 1; // Handle edge case
-                
-                diffEditor.getModifiedEditor().setPosition({ lineNumber: targetLine, column: 1 });
-                diffEditor.getModifiedEditor().revealPositionInCenter({ lineNumber: targetLine, column: 1 });
-                diffEditor.getModifiedEditor().focus();
-            }
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'diff_export.txt';
+            a.click();
+            window.URL.revokeObjectURL(url);
         };
     </script>
 </body>
