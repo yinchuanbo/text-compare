@@ -138,7 +138,15 @@
     <div id="diff-modal">
         <div id="modal-header">
             <span id="modal-title">Diff Viewer</span>
-            <button id="close-btn" onclick="closeModal()">Close</button>
+            <div id="controls" style="display: flex; align-items: center; gap: 10px;">
+                <button class="nav-btn" onclick="navPrevious()" title="Previous Change">↑ Prev</button>
+                <button class="nav-btn" onclick="navNext()" title="Next Change">↓ Next</button>
+                <div style="width: 1px; height: 20px; background: #555;"></div>
+                <label style="font-size: 14px; cursor: pointer;">
+                    <input type="checkbox" id="side-by-side-cb" checked onchange="toggleSideBySide()"> Side by Side
+                </label>
+                <button id="close-btn" onclick="closeModal()">Close</button>
+            </div>
         </div>
         <div id="diff-container"></div>
     </div>
@@ -149,6 +157,7 @@
         require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }});
 
         let diffEditor = null;
+        let diffNavigator = null;
         let originalModel = null;
         let modifiedModel = null;
 
@@ -270,14 +279,71 @@
             modifiedModel = null;
         }
 
-        function toggleSideBySide() {
+        // Attach functions to window to make them accessible from HTML
+        window.navPrevious = function() {
+            if (!diffEditor) return;
+            
+            const changes = diffEditor.getLineChanges();
+            if (!changes || changes.length === 0) return;
+            
+            const currentLine = diffEditor.getModifiedEditor().getPosition().lineNumber;
+            
+            // Find prev change (iterate backwards)
+            // Filter changes before current line
+            const prevChanges = changes.filter(c => c.modifiedStartLineNumber < currentLine);
+            
+            let prevChange = null;
+            if (prevChanges.length > 0) {
+                prevChange = prevChanges[prevChanges.length - 1];
+            } else {
+                // Wrap to last
+                prevChange = changes[changes.length - 1];
+            }
+            
+            if (prevChange) {
+                let targetLine = prevChange.modifiedStartLineNumber;
+                if (targetLine === 0) targetLine = 1;
+                
+                diffEditor.getModifiedEditor().setPosition({ lineNumber: targetLine, column: 1 });
+                diffEditor.getModifiedEditor().revealPositionInCenter({ lineNumber: targetLine, column: 1 });
+                diffEditor.getModifiedEditor().focus();
+            }
+        };
+
+        window.navNext = function() {
+            if (!diffEditor) return;
+            
+            const changes = diffEditor.getLineChanges();
+            if (!changes || changes.length === 0) return;
+            
+            const currentLine = diffEditor.getModifiedEditor().getPosition().lineNumber;
+            
+            // Find next change
+            let nextChange = changes.find(c => c.modifiedStartLineNumber > currentLine);
+            
+            // Wrap around
+            if (!nextChange) {
+                nextChange = changes[0];
+            }
+            
+            if (nextChange) {
+                let targetLine = nextChange.modifiedStartLineNumber;
+                if (targetLine === 0) targetLine = 1; // Handle edge case
+                
+                diffEditor.getModifiedEditor().setPosition({ lineNumber: targetLine, column: 1 });
+                diffEditor.getModifiedEditor().revealPositionInCenter({ lineNumber: targetLine, column: 1 });
+                diffEditor.getModifiedEditor().focus();
+            }
+        };
+
+        window.toggleSideBySide = function() {
             const isSideBySide = document.getElementById('side-by-side-cb').checked;
             if (diffEditor) {
                 diffEditor.updateOptions({
                     renderSideBySide: isSideBySide
                 });
             }
-        }
+        };
     </script>
 </body>
 </html>
