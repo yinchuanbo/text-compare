@@ -67,6 +67,7 @@ def get_diff_files():
         for diff in diffs:
             # a_path is old, b_path is new
             path = diff.b_path if diff.b_path else diff.a_path
+            path = path.replace('\\', '/')
             
             if is_static_file(path):
                 continue

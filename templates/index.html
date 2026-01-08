@@ -63,26 +63,46 @@
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             overflow: hidden;
+            padding: 10px 0;
         }
-        .file-item {
-            padding: 15px 20px;
-            border-bottom: 1px solid #eee;
+        .file-item, .folder-item {
+            padding: 8px 20px;
             cursor: pointer;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            font-size: 14px;
         }
-        .file-item:last-child {
-            border-bottom: none;
-        }
-        .file-item:hover {
+        .file-item:hover, .folder-item:hover {
             background-color: #f8f9fa;
         }
+        .folder-item {
+            font-weight: bold;
+            color: #444;
+            user-select: none;
+        }
+        .file-item {
+            color: #555;
+            padding-left: 40px; /* Base indent for files */
+        }
+        .folder-content {
+            display: block; /* Default expanded */
+        }
+        .folder-content.collapsed {
+            display: none;
+        }
+        .folder-icon {
+            margin-right: 8px;
+            display: inline-block;
+            width: 16px;
+            text-align: center;
+        }
         .change-type {
-            font-size: 12px;
-            padding: 4px 8px;
+            font-size: 11px;
+            padding: 2px 6px;
             border-radius: 4px;
             font-weight: bold;
+            margin-left: 10px;
         }
         .type-M { background-color: #fff3cd; color: #856404; }
         .type-A { background-color: #d4edda; color: #155724; }
@@ -216,24 +236,107 @@
 
                 if (data.files.length === 0) {
                     listContainer.innerHTML = '<div style="padding:20px;">No changed files found (excluding static assets).</div>';
+                    return;
                 }
 
-                data.files.forEach(file => {
-                    const div = document.createElement('div');
-                    div.className = 'file-item';
-                    div.innerHTML = `
-                        <span>${file.path}</span>
-                        <span class="change-type type-${file.change_type}">${file.change_type}</span>
-                    `;
-                    div.onclick = () => openDiff(repoPath, commitId, file.path);
-                    listContainer.appendChild(div);
-                });
+                const fileTree = buildFileTree(data.files);
+                renderTree(fileTree, listContainer, 0);
 
             } catch (err) {
                 alert('Request failed: ' + err);
             } finally {
                 loading.style.display = 'none';
             }
+        }
+
+        function buildFileTree(files) {
+            const root = { name: 'root', type: 'folder', children: {} };
+
+            files.forEach(file => {
+                const parts = file.path.split('/');
+                let current = root;
+
+                parts.forEach((part, index) => {
+                    if (index === parts.length - 1) {
+                        // File
+                        current.children[part] = {
+                            name: part,
+                            type: 'file',
+                            path: file.path,
+                            change_type: file.change_type
+                        };
+                    } else {
+                        // Folder
+                        if (!current.children[part]) {
+                            current.children[part] = {
+                                name: part,
+                                type: 'folder',
+                                children: {}
+                            };
+                        }
+                        current = current.children[part];
+                    }
+                });
+            });
+
+            return root;
+        }
+
+        function renderTree(node, container, level) {
+            const childrenKeys = Object.keys(node.children).sort((a, b) => {
+                const aNode = node.children[a];
+                const bNode = node.children[b];
+                // Folders first
+                if (aNode.type !== bNode.type) {
+                    return aNode.type === 'folder' ? -1 : 1;
+                }
+                return a.localeCompare(b);
+            });
+
+            childrenKeys.forEach(key => {
+                const child = node.children[key];
+                const indent = level * 20 + 20;
+
+                if (child.type === 'folder') {
+                    const folderDiv = document.createElement('div');
+                    folderDiv.className = 'folder-item';
+                    folderDiv.style.paddingLeft = `${indent}px`;
+                    folderDiv.innerHTML = `
+                        <span style="display:flex; align-items:center;">
+                            <span class="folder-icon">📂</span> 
+                            ${child.name}
+                        </span>
+                    `;
+                    
+                    const contentDiv = document.createElement('div');
+                    contentDiv.className = 'folder-content';
+                    
+                    folderDiv.onclick = (e) => {
+                        e.stopPropagation();
+                        contentDiv.classList.toggle('collapsed');
+                        const icon = folderDiv.querySelector('.folder-icon');
+                        icon.textContent = contentDiv.classList.contains('collapsed') ? '📁' : '📂';
+                    };
+
+                    container.appendChild(folderDiv);
+                    container.appendChild(contentDiv);
+                    
+                    renderTree(child, contentDiv, level + 1);
+                } else {
+                    const fileDiv = document.createElement('div');
+                    fileDiv.className = 'file-item';
+                    fileDiv.style.paddingLeft = `${indent}px`;
+                    fileDiv.innerHTML = `
+                        <span style="display:flex; align-items:center;">
+                            <span class="folder-icon">📄</span> 
+                            ${child.name}
+                        </span>
+                        <span class="change-type type-${child.change_type}">${child.change_type}</span>
+                    `;
+                    fileDiv.onclick = () => openDiff(document.getElementById('repo-path').value, document.getElementById('commit-id').value, child.path);
+                    container.appendChild(fileDiv);
+                }
+            });
         }
 
         async function openDiff(repoPath, commitId, filePath) {
