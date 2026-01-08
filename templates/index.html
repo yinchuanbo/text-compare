@@ -11,6 +11,24 @@
             padding: 20px;
             background-color: #f5f5f5;
         }
+        nav {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            gap: 20px;
+        }
+        nav a {
+            text-decoration: none;
+            color: #333;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        nav a:hover, nav a.active {
+            color: #007bff;
+        }
         h1 {
             color: #333;
         }
@@ -124,6 +142,11 @@
 </head>
 <body>
 
+    <nav>
+        <a href="/" class="active">Git Diff Viewer</a>
+        <a href="/explorer">File Explorer</a>
+    </nav>
+
     <h1>Text Comparator</h1>
     
     <div id="input-area">
@@ -142,9 +165,6 @@
                 <button class="nav-btn" onclick="navPrevious()" title="Previous Change">↑ Prev</button>
                 <button class="nav-btn" onclick="navNext()" title="Next Change">↓ Next</button>
                 <div style="width: 1px; height: 20px; background: #555;"></div>
-                <label style="font-size: 14px; cursor: pointer;">
-                    <input type="checkbox" id="side-by-side-cb" checked onchange="toggleSideBySide()"> Side by Side
-                </label>
                 <button id="close-btn" onclick="closeModal()">Close</button>
             </div>
         </div>
@@ -233,6 +253,12 @@
                     wordWrap: 'on',
                     diffWordWrap: 'on',
                     ignoreTrimWhitespace: true,
+                    renderSideBySide: true,
+                    useInlineViewWhenSpaceIsLimited: false
+                });
+            } else {
+                // Force Side-by-Side view every time it is opened
+                diffEditor.updateOptions({
                     renderSideBySide: true
                 });
             }
@@ -333,15 +359,6 @@
                 diffEditor.getModifiedEditor().setPosition({ lineNumber: targetLine, column: 1 });
                 diffEditor.getModifiedEditor().revealPositionInCenter({ lineNumber: targetLine, column: 1 });
                 diffEditor.getModifiedEditor().focus();
-            }
-        };
-
-        window.toggleSideBySide = function() {
-            const isSideBySide = document.getElementById('side-by-side-cb').checked;
-            if (diffEditor) {
-                diffEditor.updateOptions({
-                    renderSideBySide: isSideBySide
-                });
             }
         };
     </script>

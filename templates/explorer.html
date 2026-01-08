@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Explorer - Text Comparator</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        nav {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            gap: 20px;
+        }
+        nav a {
+            text-decoration: none;
+            color: #333;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        nav a:hover, nav a.active {
+            color: #007bff;
+        }
+        h1 {
+            color: #333;
+        }
+        #input-area {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        input {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            flex-grow: 1;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #file-list {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .file-item {
+            padding: 10px 20px;
+            border-bottom: 1px solid #eee;
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 14px;
+            color: #333;
+        }
+        .file-item:last-child {
+            border-bottom: none;
+        }
+        .file-item:hover {
+            background-color: #f8f9fa;
+        }
+        #loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        .error-msg {
+            color: #dc3545;
+            padding: 10px 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <nav>
+        <a href="/">Git Diff Viewer</a>
+        <a href="/explorer" class="active">File Explorer</a>
+    </nav>
+
+    <h1>File Explorer</h1>
+    
+    <div id="input-area">
+        <input type="text" id="dir-path" placeholder="Directory Absolute Path (e.g. C:/Users/Dev/Project)">
+        <input type="text" id="split-key" value="new-template" placeholder="Split Path Key (Optional, e.g. new-template)" style="max-width: 250px;">
+        <button onclick="scanDirectory()">Scan Directory</button>
+        <button onclick="exportToTxt()" style="background-color: #28a745;">Export to TXT</button>
+    </div>
+
+    <div id="loading">Scanning directory...</div>
+    <div id="file-list"></div>
+
+    <script>
+        async function scanDirectory() {
+            const dirPath = document.getElementById('dir-path').value;
+            const splitKey = document.getElementById('split-key').value;
+            const listContainer = document.getElementById('file-list');
+            const loading = document.getElementById('loading');
+
+            if (!dirPath) {
+                alert('Please enter a Directory Path');
+                return;
+            }
+
+            listContainer.innerHTML = '';
+            loading.style.display = 'block';
+
+            try {
+                const response = await fetch('/api/scan_directory', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        dir_path: dirPath,
+                        split_key: splitKey
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    listContainer.innerHTML = `<div class="error-msg">Error: ${data.error}</div>`;
+                    return;
+                }
+
+                if (data.files.length === 0) {
+                    listContainer.innerHTML = '<div style="padding:20px;">No files found in this directory.</div>';
+                }
+
+                data.files.forEach(file => {
+                    const div = document.createElement('div');
+                    div.className = 'file-item';
+                    div.textContent = file;
+                    listContainer.appendChild(div);
+                });
+
+            } catch (err) {
+                listContainer.innerHTML = `<div class="error-msg">Request failed: ${err}</div>`;
+            } finally {
+                loading.style.display = 'none';
+            }
+        }
+
+        function exportToTxt() {
+            const listContainer = document.getElementById('file-list');
+            const fileItems = listContainer.querySelectorAll('.file-item');
+            
+            if (fileItems.length === 0) {
+                alert('No files to export. Please scan a directory first.');
+                return;
+            }
+
+            let content = '';
+            fileItems.forEach(item => {
+                content += item.textContent + '\n';
+            });
+
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'file_list.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>

@@ -162,5 +162,77 @@ def get_language_from_ext(filename):
     }
     return map.get(ext, 'plaintext')
 
+@app.route('/explorer')
+def explorer():
+    return render_template('explorer.html')
+
+@app.route('/api/scan_directory', methods=['POST'])
+def scan_directory():
+    data = request.json
+    dir_path = data.get('dir_path')
+    split_key = data.get('split_key')
+    
+    if not dir_path:
+        return jsonify({'error': 'Missing dir_path'}), 400
+        
+    if not os.path.exists(dir_path):
+        return jsonify({'error': 'Directory does not exist'}), 404
+        
+    if not os.path.isdir(dir_path):
+        return jsonify({'error': 'Path is not a directory'}), 400
+        
+    file_list = []
+    try:
+        for root, dirs, files in os.walk(dir_path):
+            # Optional: Ignore .git directories to reduce noise
+            if '.git' in dirs:
+                dirs.remove('.git')
+            if '__pycache__' in dirs:
+                dirs.remove('__pycache__')
+            if 'node_modules' in dirs:
+                dirs.remove('node_modules')
+                
+            for file in files:
+                full_path = os.path.join(root, file)
+                
+                final_path = ""
+                
+                if split_key:
+                     norm_path = os.path.normpath(full_path)
+                     # Split path into parts to find the key safely
+                     path_parts = norm_path.split(os.sep)
+                     
+                     # Case insensitive search
+                     path_parts_lower = [p.lower() for p in path_parts]
+                     split_key_lower = split_key.lower()
+                     
+                     if split_key_lower in path_parts_lower:
+                         try:
+                             # Find index of the key
+                             idx = path_parts_lower.index(split_key_lower)
+                             # Reconstruct path from parts AFTER the key
+                             if idx + 1 < len(path_parts):
+                                 final_path = os.path.join(*path_parts[idx+1:])
+                             else:
+                                 final_path = "" # Should not happen for a file
+                         except ValueError:
+                             final_path = os.path.relpath(full_path, dir_path)
+                     else:
+                         final_path = os.path.relpath(full_path, dir_path)
+                else:
+                    # Get relative path normally
+                    final_path = os.path.relpath(full_path, dir_path)
+                
+                # Normalize path separators
+                final_path = os.path.normpath(final_path)
+                # Force forward slashes
+                final_path = final_path.replace('\\', '/')
+                if final_path and final_path != ".":
+                    file_list.append(final_path)
+                
+        return jsonify({'files': file_list})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
